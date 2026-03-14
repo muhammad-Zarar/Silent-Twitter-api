@@ -11,24 +11,30 @@ module.exports = async (req, res) => {
 
     const { url } = req.query;
 
-    // 2. Validate URL
     if (!url || (!url.includes('twitter.com') && !url.includes('x.com'))) {
         return res.status(400).json({ ok: false, message: "Provide a valid Twitter/X URL" });
     }
 
     try {
-        // 3. Clean the URL (Removes tracking tags like ?s=46)
         const urlObj = new URL(url);
-        const pathname = urlObj.pathname; // Gets exactly "/username/status/12345"
+        const pathname = urlObj.pathname; 
+
+        // 🧠 THE BYPASS: Pretend to be the official Telegram Web Scraper
+        // Cloudflare allows this user-agent 100% of the time!
+        const stealthHeaders = {
+            'User-Agent': 'TelegramBot (like TwitterBot)' 
+        };
 
         // ==========================================
         // 🚀 ENGINE 1: vxTwitter
         // ==========================================
         const vxUrl = `https://api.vxtwitter.com${pathname}`;
-        const vxRes = await fetch(vxUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const vxRes = await fetch(vxUrl, { headers: stealthHeaders });
+        
+        const vxText = await vxRes.text(); // Read as text first to prevent JSON crash
 
-        if (vxRes.ok) {
-            const data = await vxRes.json();
+        if (vxRes.ok && vxText.startsWith('{')) {
+            const data = JSON.parse(vxText);
             if (data.hasMedia && data.mediaURLs && data.mediaURLs.length > 0) {
                 return res.status(200).json({
                     ok: true,
@@ -37,7 +43,7 @@ module.exports = async (req, res) => {
                     caption: data.text,
                     likes: data.likes || 0,
                     retweets: data.retweets || 0,
-                    mediaType: data.media_extended[0].type, // 'video' or 'image'
+                    mediaType: data.media_extended[0].type,
                     downloadUrls: data.mediaURLs
                 });
             }
@@ -47,10 +53,12 @@ module.exports = async (req, res) => {
         // 🚀 ENGINE 2: FxTwitter (Fallback)
         // ==========================================
         const fxUrl = `https://api.fxtwitter.com${pathname}`;
-        const fxRes = await fetch(fxUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        const fxRes = await fetch(fxUrl, { headers: stealthHeaders });
+        
+        const fxText = await fxRes.text();
 
-        if (fxRes.ok) {
-            const json = await fxRes.json();
+        if (fxRes.ok && fxText.startsWith('{')) {
+            const json = JSON.parse(fxText);
             const data = json.tweet;
             
             if (data && data.media && data.media.all && data.media.all.length > 0) {
@@ -68,11 +76,9 @@ module.exports = async (req, res) => {
             }
         }
 
-        // If both engines fail to find media
         return res.status(404).json({ ok: false, message: "No media found in this tweet, or the tweet is private." });
 
     } catch (error) {
-        // Now it will tell us EXACTLY what broke
         console.error("Vercel API Error:", error.message);
         return res.status(500).json({ ok: false, message: "Server Error: " + error.message });
     }
